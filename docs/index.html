@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Silver rate chart</title>
+<style>
+:root{color-scheme:light dark;box-sizing:border-box;--bg:#fff;--fg:#1b2430;--mut:#5b6878;--grid:#e4e8ee;--card:#f5f7fa;--bd:#d3dae3;--up:#12793c;--down:#c42f2f}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#12171d;--fg:#e8edf3;--mut:#9aa7b7;--grid:#27303b;--card:#1a212a;--bd:#33404e;--up:#4cc38a;--down:#ff7b72}}
+*,*::before,*::after{box-sizing:inherit}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.5 "Segoe UI",system-ui,Arial,sans-serif}
+main{max-width:760px;margin:0 auto;padding:24px 16px 32px}
+.lbl{margin:0;color:var(--mut);font-size:15px}
+h1{margin:4px 0 2px;font-size:clamp(30px,7vw,44px);font-weight:600;letter-spacing:-.5px;line-height:1.1}
+.chg{margin:0;font-size:15px;font-weight:600}
+.meta{margin:4px 0 12px;color:var(--mut);font-size:13px}
+.rng{display:flex;gap:4px;margin:12px 0 8px}
+.rng button{flex:1;max-width:96px;font:inherit;font-size:14px;color:var(--mut);background:none;border:0;border-radius:999px;padding:8px 0;cursor:pointer}
+.rng button[aria-pressed="true"]{background:var(--card);color:var(--fg);font-weight:600;box-shadow:inset 0 0 0 1px var(--bd)}
+.rng button:disabled{opacity:.4;cursor:default}
+:focus-visible{outline:2px solid var(--fg);outline-offset:2px}
+#chart{position:relative;touch-action:pan-y;cursor:crosshair}
+svg{display:block;width:100%}
+.gl{stroke:var(--grid);stroke-width:1}
+.tx{fill:var(--mut);font-size:12px}
+.ln{fill:none;stroke:var(--c);stroke-width:2;stroke-linejoin:round}
+.ar{fill:var(--c);opacity:.12}
+.ch{stroke:var(--mut);stroke-width:1;stroke-dasharray:3 3}
+.dt{fill:var(--c);stroke:var(--bg);stroke-width:2}
+#tip{position:absolute;top:0;pointer-events:none;background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:6px 10px;font-size:13px;white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,.12)}
+.note{margin:16px 0 0;color:var(--mut);font-size:13px}
+.note a{color:inherit}
+</style>
+</head>
+<body>
+<main>
+<p class="lbl">1 kg of silver (international spot price, in INR) is</p>
+<h1 id="price">&nbsp;</h1>
+<p class="chg" id="chg">&nbsp;</p>
+<p class="meta" id="meta">Loading prices...</p>
+<div class="rng" id="rng" role="group" aria-label="Time range"></div>
+<div id="chart"><svg id="svg" role="img" aria-label="Silver price chart"></svg><div id="tip" hidden></div></div>
+<p class="note">International spot price converted to rupees. Indian market rates also include import duty, GST and dealer premiums, so local prices will differ. Not financial advice.</p>
+<p class="note">Price data: <a href="https://metalpriceapi.com" target="_blank" rel="noopener">MetalpriceAPI.com</a></p>
+</main>
+<script>
+var RANGES=["5D","1M","1Y","Max"],state={range:"1M"},D=null,geo=null;
+var S=document.getElementById("svg"),C=document.getElementById("chart"),T=document.getElementById("tip"),box=document.getElementById("rng");
+function money(n){return"\u20B9"+Math.round(n).toLocaleString("en-IN")}
+function dstr(d,full){
+  var o={day:"numeric",month:"short"};
+  if(state.range==="1Y"||state.range==="Max")o={day:"numeric",month:"short",year:"numeric"};
+  if(full&&state.range==="5D")o={weekday:"short",day:"numeric",month:"short",hour:"numeric",minute:"2-digit"};
+  if(!full&&state.range==="1Y")o={month:"short",year:"2-digit"};
+  if(!full&&state.range==="Max")o={month:"short",year:"numeric"};
+  return d.toLocaleString("en-IN",o)
+}
+function series(r){
+  var v=[],t=[];
+  if(r==="5D"){var cut=Date.now()/1000-5*86400;(D.hourly||[]).forEach(function(p){if(p[0]>=cut){t.push(new Date(p[0]*1000));v.push(p[1])}})}
+  else{var d=D.daily||[],k={"1M":30,"1Y":365,"Max":d.length}[r];d.slice(-k).forEach(function(p){t.push(new Date(p[0]+"T00:00:00Z"));v.push(p[1])})}
+  return{v:v,t:t}
+}
+function draw(){
+  var s=series(state.range),v=s.v,t=s.t,n=v.length,W=C.clientWidth||600,H=Math.round(Math.min(320,Math.max(220,W*.5)));
+  S.setAttribute("viewBox","0 0 "+W+" "+H);S.setAttribute("height",H);geo=null;
+  if(n<2){S.innerHTML='<text class="tx" x="'+W/2+'" y="'+H/2+'" text-anchor="middle">Not enough data for this range yet</text>';return}
+  var pl=64,pr=10,pt=12,pb=26,lo=Math.min.apply(0,v),hi=Math.max.apply(0,v),pad=(hi-lo)*.08||1;
+  lo-=pad;hi+=pad;
+  var steps=[500,1000,2000,2500,5000,10000,20000,50000],st=steps[steps.length-1];
+  for(var q=0;q<steps.length;q++){if((hi-lo)/steps[q]<=5){st=steps[q];break}}
+  var y0=Math.floor(lo/st)*st,y1=Math.ceil(hi/st)*st;
+  var X=function(i){return pl+(W-pl-pr)*i/(n-1)},Y=function(x){return pt+(H-pt-pb)*(1-(x-y0)/(y1-y0))};
+  var end=D.latest?D.latest.value:v[n-1],up=end>=v[0],col=up?"var(--up)":"var(--down)",h="",y,i;
+  C.style.setProperty("--c",col);
+  for(y=y0;y<=y1;y+=st){h+='<line class="gl" x1="'+pl+'" x2="'+(W-pr)+'" y1="'+Y(y)+'" y2="'+Y(y)+'"/><text class="tx" x="'+(pl-8)+'" y="'+(Y(y)+4)+'" text-anchor="end">'+y.toLocaleString("en-IN")+'</text>'}
+  for(var k=0;k<5;k++){i=Math.round(k*(n-1)/4);h+='<text class="tx" x="'+X(i)+'" y="'+(H-6)+'" text-anchor="'+(k===0?"start":k===4?"end":"middle")+'">'+dstr(t[i])+'</text>'}
+  var p=v.map(function(x,j){return(j?"L":"M")+X(j).toFixed(1)+" "+Y(x).toFixed(1)}).join("");
+  h+='<path class="ar" d="'+p+"L"+X(n-1)+" "+Y(y0)+"L"+X(0)+" "+Y(y0)+'Z"/><path class="ln" d="'+p+'"/>';
+  h+='<line class="ch" id="ch" y1="'+pt+'" y2="'+(H-pb)+'" visibility="hidden"/><circle class="dt" id="dt" r="5" visibility="hidden"/>';
+  S.innerHTML=h;geo={n:n,v:v,t:t,X:X,Y:Y,pl:pl,pr:pr,W:W};
+  var d=end-v[0],pc=d/v[0]*100,lbl={"5D":"past 5 days","1M":"past month","1Y":"past year","Max":"since "+t[0].getUTCFullYear()}[state.range];
+  document.getElementById("price").textContent=money(end);
+  var c=document.getElementById("chg");c.style.color=col;c.textContent=(d>=0?"+":"\u2212")+money(Math.abs(d))+" ("+Math.abs(pc).toFixed(2)+"%) "+lbl;
+  S.setAttribute("aria-label","Silver price in rupees per kg, "+lbl+", from "+money(v[0])+" to "+money(end))
+}
+function hover(e){
+  if(!geo)return;var r=S.getBoundingClientRect(),x=e.clientX-r.left,i=Math.round((x-geo.pl)/(geo.W-geo.pl-geo.pr)*(geo.n-1));
+  i=Math.max(0,Math.min(geo.n-1,i));var px=geo.X(i),py=geo.Y(geo.v[i]),ch=document.getElementById("ch"),dt=document.getElementById("dt");
+  ch.setAttribute("x1",px);ch.setAttribute("x2",px);ch.setAttribute("visibility","visible");
+  dt.setAttribute("cx",px);dt.setAttribute("cy",py);dt.setAttribute("visibility","visible");
+  T.hidden=false;T.textContent=money(geo.v[i])+"  "+dstr(geo.t[i],true);
+  T.style.left=Math.max(0,Math.min(geo.W-T.offsetWidth,px-T.offsetWidth/2))+"px"
+}
+function leave(){T.hidden=true;["ch","dt"].forEach(function(id){var el=document.getElementById(id);if(el)el.setAttribute("visibility","hidden")})}
+C.addEventListener("pointermove",hover);C.addEventListener("pointerdown",hover);C.addEventListener("pointerleave",leave);
+function init(){
+  RANGES.forEach(function(r){var b=document.createElement("button");b.type="button";b.textContent=r;b.setAttribute("aria-pressed",r===state.range);
+    b.disabled=series(r).v.length<2;
+    b.addEventListener("click",function(){state.range=r;[].forEach.call(box.children,function(x){x.setAttribute("aria-pressed",x===b)});draw()});box.appendChild(b)});
+  var u=new Date(D.updated);
+  document.getElementById("meta").textContent="Updated "+u.toLocaleString("en-IN",{day:"numeric",month:"short",hour:"numeric",minute:"2-digit"});
+  draw()
+}
+fetch("data.json?v="+Date.now()).then(function(r){if(!r.ok)throw 0;return r.json()}).then(function(j){D=j;init()}).catch(function(){
+  document.getElementById("meta").textContent="Waiting for the first price update. Check back shortly."});
+window.addEventListener("resize",function(){if(D)draw()});
+</script>
+</body>
+</html>
